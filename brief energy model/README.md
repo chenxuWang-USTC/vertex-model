@@ -1,2 +1,2 @@
-# vertex-model
-This part is just about two-dimensional vertex model to simulate crossing-section of the organoid.
+# energy-model
+A simple energy model quickly obtains a rough picture of organoid growth 
