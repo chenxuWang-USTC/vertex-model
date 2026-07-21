@@ -233,7 +233,7 @@ clc;
             
             % Pressure Models
             P_ecm(i) = 500/(77e-6)*norm(r_b(i,:)) - 400;
-            P_water(i) = 800*sqrt(66e-6)/sqrt(norm(r_a(i,:))) - 700;
+            P_water(i) = 200;
         end
             
         % ====== 7.2 Update Geometric Quantities ======

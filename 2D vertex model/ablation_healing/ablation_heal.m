@@ -170,8 +170,12 @@ for step = 1:num_steps
     end
 
     %% --- 5.3 Force Calculations ---
-    P_ecm = zeros(n,1); P_water = zeros(n,1); A_eff = zeros(n,1);
-    v_a = zeros(n,2); v_b = zeros(n,2); v_side = zeros(n,2);
+    P_ecm = zeros(n,1); 
+    P_water = zeros(n,1); 
+    A_eff = zeros(n,1);
+    v_a = zeros(n,2); 
+    v_b = zeros(n,2); 
+    v_side = zeros(n,2);
     
     for i = 1:n
         next = mod(i, n) + 1;
@@ -181,7 +185,7 @@ for step = 1:num_steps
         
         % Pressure Models
         P_ecm(i) = 700/(77e-6)*norm(r_b(i,:)) - 400;
-        P_water_raw = 1000*sqrt(66e-6)/sqrt(norm(r_a(i,:))) - 700;
+        P_water_raw = 400;
         
         % Water Pressure Recovery Logic
         if ~is_healed_permanently
@@ -196,12 +200,17 @@ for step = 1:num_steps
     end
     
     % Geometric Quantities
-    l_a = sqrt(sum(v_a.^2, 2)); l_b = sqrt(sum(v_b.^2, 2)); l_side = sqrt(sum(v_side.^2, 2));
-    e_a = v_a ./ l_a; e_b = v_b ./ l_b; e_side = v_side ./ l_side;
+    l_a = sqrt(sum(v_a.^2, 2)); 
+    l_b = sqrt(sum(v_b.^2, 2)); l_side = sqrt(sum(v_side.^2, 2));
+    e_a = v_a ./ l_a; 
+    e_b = v_b ./ l_b; 
+    e_side = v_side ./ l_side;
 
     %% --- 5.4 Bending Forces ---
-    F_bend_a = zeros(n, 2); F_bend_b = zeros(n, 2); E_bend = 0;
-    target_cos = 0; bend_coeff = 2 * kappa_bend;
+    F_bend_a = zeros(n, 2); 
+    F_bend_b = zeros(n, 2); E_bend = 0;
+    target_cos = 0; 
+    bend_coeff = 2 * kappa_bend;
     
     for i = 1:n
         if is_ablated(i)
@@ -210,18 +219,24 @@ for step = 1:num_steps
         next_idx = mod(i, n) + 1;
         
         % Vectors for angles
-        u_in = r_a(next_idx,:) - r_a(i,:); u_out = r_b(next_idx,:) - r_b(i,:);
-        w_in = r_b(i,:) - r_a(i,:); w_next = r_b(next_idx,:) - r_a(next_idx,:);
+        u_in = r_a(next_idx,:) - r_a(i,:);
+        u_out = r_b(next_idx,:) - r_b(i,:);
+        w_in = r_b(i,:) - r_a(i,:); 
+        w_next = r_b(next_idx,:) - r_a(next_idx,:);
         
-        len_uin = norm(u_in); len_uout = norm(u_out);
-        len_win = norm(w_in); len_wnext = norm(w_next);
+        len_uin = norm(u_in); 
+        len_uout = norm(u_out);
+        len_win = norm(w_in); 
+        len_wnext = norm(w_next);
         
         if min([len_uin, len_uout, len_win, len_wnext]) < 1e-12
             continue; 
         end
         
-        e_uin = u_in/len_uin; e_uout = u_out/len_uout;
-        e_win = w_in/len_win; e_wnext = w_next/len_wnext;
+        e_uin = u_in/len_uin; 
+        e_uout = u_out/len_uout;
+        e_win = w_in/len_win; 
+        e_wnext = w_next/len_wnext;
         
         % Calculate 4 corner angles and gradients (Simplified for brevity)
         % Note: Full gradient derivation retained from original logic
@@ -265,8 +280,10 @@ for step = 1:num_steps
     end
 
     %% --- 5.5 Surface Tension Forces ---
-    grad_U_a = zeros(n, 2); grad_U_b = zeros(n, 2);
-    grad_side_a = zeros(n, 2); grad_side_b = zeros(n, 2);
+    grad_U_a = zeros(n, 2); 
+    grad_U_b = zeros(n, 2);
+    grad_side_a = zeros(n, 2); 
+    grad_side_b = zeros(n, 2);
     
     for i = 1:n
         next = mod(i, n) + 1;
@@ -298,17 +315,25 @@ for step = 1:num_steps
     for i = 1:n
         prev = mod(i-2, n) + 1;
         % Inner Pressure Force
-        v_prev = v_a(prev,:); v_i = v_a(i,:);
-        t1 = v_i/norm(v_i); t2 = v_prev/norm(v_prev);
-        n1 = [t1(2), -t1(1)]; e1 = n1/norm(n1);
-        n2 = [t2(2), -t2(1)]; e2 = n2/norm(n2);
+        v_prev = v_a(prev,:); 
+        v_i = v_a(i,:);
+        t1 = v_i/norm(v_i); 
+        t2 = v_prev/norm(v_prev);
+        n1 = [t1(2), -t1(1)]; 
+        e1 = n1/norm(n1);
+        n2 = [t2(2), -t2(1)]; 
+        e2 = n2/norm(n2);
         F_water(i,:) = P_water(i)*sqrt(3)/2 * (l_a(prev)^2*e2 + l_a(i)^2*e1);
         
         % Outer Pressure Force
-        v_prev = v_b(prev,:); v_i = v_b(i,:);
-        t1 = v_i/norm(v_i); t2 = v_prev/norm(v_prev);
-        n1 = [-t1(2), t1(1)]; e1 = n1/norm(n1);
-        n2 = [-t2(2), t2(1)]; e2 = n2/norm(n2);
+        v_prev = v_b(prev,:); 
+        v_i = v_b(i,:);
+        t1 = v_i/norm(v_i); 
+        t2 = v_prev/norm(v_prev);
+        n1 = [-t1(2), t1(1)]; 
+        e1 = n1/norm(n1);
+        n2 = [-t2(2), t2(1)]; 
+        e2 = n2/norm(n2);
         F_ecm(i,:) = P_ecm(i)*sqrt(3)/2 * (l_b(prev)^2*e2 + l_b(i)^2*e1);
     end
 
@@ -316,7 +341,10 @@ for step = 1:num_steps
     F_area_a = zeros(n, 2); F_area_b = zeros(n, 2);
     for i = 1:n
         next = mod(i, n) + 1;
-        P1=r_a(i,:); P2=r_b(i,:); P3=r_b(next,:); P4=r_a(next,:);
+        P1=r_a(i,:); 
+        P2=r_b(i,:); 
+        P3=r_b(next,:); 
+        P4=r_a(next,:);
         A_curr = quad_area(P1, P2, P3, P4);
         dA = A_curr - A0;
         
