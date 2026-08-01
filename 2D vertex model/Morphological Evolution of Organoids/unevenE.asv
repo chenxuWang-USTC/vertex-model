@@ -1,0 +1,550 @@
+% ================================================================
+% ENERGY_LANDSCAPE_SCHEMATIC_COMPLETE.m
+% Complete Code: Energy Landscape Schematic (Equidistant X-axis + Virtual State Directly Above + Black Platform + Reduced Size)
+% ================================================================
+
+clear; clc; close all;
+
+%% ========== 1. Simulation Parameters ==========
+n = 40; 
+dt = 0.2; 
+num_steps = 10000; 
+mu = 0.4;
+gamma_a_base = 2e-3; 
+gamma_b_base = -1e-3; 
+gamma_l_base = -3e-3;
+A_param = 5e-23; 
+K_area = 1e9; 
+kappa_bend = 1e-12;
+
+%% ========== 2. Initialize Local Tension and Geometry ==========
+gamma_a_local = ones(n, 1) * gamma_a_base;
+gamma_b_local = ones(n, 1) * gamma_b_base;
+gamma_l_local = ones(n, 1) * gamma_l_base;
+
+L = intital(); 
+r_a = L.r_a; 
+r_b = L.r_b; 
+A0 = L.A0;
+R_a_mean = mean(sqrt(sum(r_a.^2, 2))); 
+R_b_mean = mean(sqrt(sum(r_b.^2, 2)));
+theta = linspace(0, 2*pi, n+1)'; 
+theta(end) = [];
+r_a = R_a_mean * [cos(theta), sin(theta)]; 
+r_b = R_b_mean * [cos(theta), sin(theta)];
+r_a_init = r_a; 
+r_b_init = r_b;
+
+%% ========== 3. Calculate Reference Energy (Baseline) ==========
+E_ref_a = zeros(n, 1); E_ref_b = zeros(n, 1); E_ref_vol = zeros(n, 1);
+for i = 1:n
+    next_idx = mod(i, n) + 1;
+    l_a_i = norm(r_a_init(next_idx,:) - r_a_init(i,:)); 
+    l_b_i = norm(r_b_init(next_idx,:) - r_b_init(i,:));
+    l_side_i = norm(r_b_init(i,:) - r_a_init(i,:)); 
+    l_side_next = norm(r_b_init(next_idx,:) - r_a_init(next_idx,:));
+    E_ref_a(i) = 0.5 * sqrt(3) * gamma_a_base * l_a_i^2;
+    E_ref_b(i) = 0.5 * sqrt(3) * gamma_b_base * l_b_i^2;
+    P1=r_a_init(i,:); 
+    P2=r_b_init(i,:); 
+    P3=r_b_init(next_idx,:); 
+    P4=r_a_init(next_idx,:);
+    A_curr = quad_area(P1, P2, P3, P4);
+    E_area = 0.5 * K_area * (A_curr - A0)^2;
+    E_gauss = 0;
+    if (l_a_i*l_b_i) > 1e-24 && (l_side_i*l_side_next) > 1e-24
+        E_gauss = (2 * A_param) / (l_a_i * l_b_i) + A_param / (l_side_i * l_side_next);
+    end
+    E_ref_vol(i) = E_area + E_gauss;
+end
+E_total_ref = sum(E_ref_a) + sum(E_ref_b) + sum(E_ref_vol);
+
+%% ========== 4. Apply Spatial Tension Distribution ==========
+angle_edges = [0, pi/8, pi/4, 3*pi/8, 2*pi/4, 5*pi/8, 3*pi/4, 7*pi/8, pi, ...
+               9*pi/8, 5*pi/4, 11*pi/8, 6*pi/4, 13*pi/8, 7*pi/4, 15*pi/8, 2*pi];
+num_regions = length(angle_edges) - 1;
+gamma_b_pattern = [20e-3, 2e-3, 20e-3, 2e-3, 10e-3, 2e-3, 20e-3, 2e-3, ...
+                   20e-3, 2e-3, 2e-3, 10e-3, 2e-3, 20e-3, 2e-3, 10e-3];
+theta_b = mod(atan2(r_b(:,2), r_b(:,1)), 2*pi);
+for i = 1:n
+    for reg = 1:num_regions
+        if theta_b(i) >= angle_edges(reg) && theta_b(i) < angle_edges(reg+1)
+            gamma_b_local(i) = gamma_b_pattern(reg); break;
+        end
+    end
+end
+
+%% ========== 5. State Saving Settings ==========
+save_steps = [1, 20, 50, -1]; 
+saved_states = struct();
+saved_states.r_a = cell(length(save_steps) + 2, 1); 
+saved_states.r_b = cell(length(save_steps) + 2, 1);
+save_idx = 0; next_save_idx = 1;
+save_idx = save_idx + 1;
+saved_states.r_a{save_idx} = r_a_init; saved_states.r_b{save_idx} = r_b_init;
+
+%% ========== 6. Initialize Edge Vectors ==========
+v_a = zeros(n, 2); v_b = zeros(n, 2); v_side = zeros(n, 2);
+for i = 1:n
+    next_idx = mod(i, n) + 1;
+    v_a(i,:) = r_a(next_idx,:) - r_a(i,:); 
+    v_b(i,:) = r_b(next_idx,:) - r_b(i,:); 
+    v_side(i,:) = r_b(i,:) - r_a(i,:);
+end
+
+%% ========== 7. Main Simulation Loop ==========
+fprintf('=== Starting Simulation ===\n');
+for step = 1:num_steps
+    % --- 7.1 Update Edge Vectors and Pressure ---
+    P_ecm = zeros(n,1); P_water = zeros(n,1);
+    for i = 1:n
+        next_idx = mod(i, n) + 1;
+        v_a(i,:) = r_a(next_idx,:) - r_a(i,:); 
+        v_b(i,:) = r_b(next_idx,:) - r_b(i,:); 
+        v_side(i,:) = r_b(i,:) - r_a(i,:);
+        P_ecm(i) = 500/(77e-6)*norm(r_b(i,:)) - 400; P_water(i) = 200;
+    end
+    l_a = zeros(n,1); l_b = zeros(n,1); l_side = zeros(n,1);
+    e_a = zeros(n,2); e_b = zeros(n,2); e_side = zeros(n,2);
+    for i = 1:n
+        l_a(i) = norm(v_a(i,:)); 
+        l_b(i) = norm(v_b(i,:)); 
+        l_side(i) = norm(v_side(i,:));
+        e_a(i,:) = v_a(i,:) ./ l_a(i); 
+        e_b(i,:) = v_b(i,:) ./ l_b(i); 
+        e_side(i,:) = v_side(i,:) ./ l_side(i);
+    end
+
+    % --- 7.3 Bending Stiffness Force ---
+    F_bend_a = zeros(n, 2); F_bend_b = zeros(n, 2); bend_coeff = 2 * kappa_bend;
+    for i = 1:n
+        next_idx = mod(i, n) + 1;
+        r_ai = r_a(i,:); 
+        r_ain = r_a(next_idx,:); 
+        r_bi = r_b(i,:); 
+        r_bin = r_b(next_idx,:);
+        u_inner = r_ain - r_ai; 
+        u_outer = r_bin - r_bi; 
+        w_side_i = r_bi - r_ai; 
+        w_side_next = r_bin - r_ain;
+        len_uin = norm(u_inner); 
+        len_uout = norm(u_outer); 
+        len_win = norm(w_side_i); 
+        len_wnext = norm(w_side_next);
+        if min([len_uin, len_uout, len_win, len_wnext]) < 1e-12
+            continue; 
+        end
+        e_uin = u_inner/len_uin; 
+        e_uout = u_outer/len_uout; 
+        e_win = w_side_i/len_win; 
+        e_wnext = w_side_next/len_wnext;
+        cos1 = max(-1, min(1, dot(e_win, e_uin)));
+        if abs(cos1) > 1e-8
+            f = -bend_coeff*cos1; 
+            gw = (e_uin - cos1*e_win)/len_win; 
+            gu = (e_win - cos1*e_uin)/len_uin;
+            F_bend_b(i,:) = F_bend_b(i,:) + f*gw; 
+            F_bend_a(i,:) = F_bend_a(i,:) - f*gw; 
+            F_bend_a(next_idx,:) = F_bend_a(next_idx,:) + f*gu; 
+            F_bend_a(i,:) = F_bend_a(i,:) - f*gu; 
+        end
+        cos2 = max(-1, min(1, dot(-e_win, e_uout)));
+        if abs(cos2) > 1e-8
+            f = -bend_coeff*cos2; 
+            gw = (e_uout - cos2*(-e_win))/len_win; 
+            gu = ((-e_win) - cos2*e_uout)/len_uout;
+            F_bend_a(i,:) = F_bend_a(i,:) + f*gw; 
+            F_bend_b(i,:) = F_bend_b(i,:) - f*gw; 
+            F_bend_b(next_idx,:) = F_bend_b(next_idx,:) + f*gu; 
+            F_bend_b(i,:) = F_bend_b(i,:) - f*gu; 
+        end
+        cos3 = max(-1, min(1, dot(-e_uin, e_wnext)));
+        if abs(cos3) > 1e-8
+            f = -bend_coeff*cos3; 
+            gu = (e_wnext - cos3*(-e_uin))/len_uin; 
+            gn = ((-e_uin) - cos3*e_wnext)/len_wnext;
+            F_bend_a(i,:) = F_bend_a(i,:) + f*gu; 
+            F_bend_a(next_idx,:) = F_bend_a(next_idx,:) - f*gu; 
+            F_bend_b(next_idx,:) = F_bend_b(next_idx,:) + f*gn; 
+            F_bend_a(next_idx,:) = F_bend_a(next_idx,:) - f*gn; 
+        end
+        cos4 = max(-1, min(1, dot(-e_uout, e_wnext)));
+        if abs(cos4) > 1e-8
+            f = -bend_coeff*cos4; 
+            gu = (e_wnext - cos4*(-e_uout))/len_uout; 
+            gn = ((-e_uout) - cos4*e_wnext)/len_wnext;
+            F_bend_b(i,:) = F_bend_b(i,:) + f*gu; 
+            F_bend_b(next_idx,:) = F_bend_b(next_idx,:) - f*gu; 
+            F_bend_b(next_idx,:) = F_bend_b(next_idx,:) + f*gn; 
+            F_bend_a(next_idx,:) = F_bend_a(next_idx,:) - f*gn; 
+        end
+    end
+
+    % --- 7.4 Surface Tension Gradient ---
+    grad_U_a = zeros(n, 2); 
+    grad_U_b = zeros(n, 2); 
+    grad_side_a = zeros(n, 2); 
+    grad_side_b = zeros(n, 2);
+    for i = 1:n
+        next_idx = mod(i, n) + 1;
+        grad_U_a(i,:) = grad_U_a(i,:) + sqrt(3) * gamma_a_local(i) * l_a(i) * (-e_a(i,:));
+        grad_U_a(next_idx,:) = grad_U_a(next_idx,:) + sqrt(3) * gamma_a_local(i) * l_a(i) * e_a(i,:);
+        grad_U_b(i,:) = grad_U_b(i,:) + sqrt(3) * gamma_b_local(i) * l_b(i) * (-e_b(i,:));
+        grad_U_b(next_idx,:) = grad_U_b(next_idx,:) + sqrt(3) * gamma_b_local(i) * l_b(i) * e_b(i,:);
+        grad_side_a(i,:) = grad_side_a(i,:) - e_a(i,:)*gamma_l_local(i)/sqrt(12)*(l_side(i)+l_side(next_idx)) - e_side(i,:)*gamma_l_local(i)/sqrt(12)*(l_a(i)+l_b(i));
+        grad_side_a(next_idx,:) = grad_side_a(next_idx,:) + e_a(i,:)*gamma_l_local(i)/sqrt(12)*(l_side(i)+l_side(next_idx)) - e_side(next_idx,:)*gamma_l_local(i)/sqrt(12)*(l_a(i)+l_b(i));
+        grad_side_b(i,:) = grad_side_b(i,:) - e_b(i,:)*gamma_l_local(i)/sqrt(12)*(l_side(i)+l_side(next_idx)) + e_side(i,:)*gamma_l_local(i)/sqrt(12)*(l_a(i)+l_b(i));
+        grad_side_b(next_idx,:) = grad_side_b(next_idx,:) + e_b(i,:)*gamma_l_local(i)/sqrt(12)*(l_side(i)+l_side(next_idx)) + e_side(next_idx,:)*gamma_l_local(i)/sqrt(12)*(l_a(i)+l_b(i));
+    end
+    F_surface_a = -grad_U_a; 
+    F_surface_b = -grad_U_b;
+
+    % --- 7.5 Pressure Forces ---
+    F_water = zeros(n, 2); 
+    F_ecm = zeros(n, 2);
+    for i = 1:n
+        prev_idx = mod(i-2, n) + 1;
+        v_prev = v_a(prev_idx,:); 
+        v_i = v_a(i,:);
+        t1 = v_i/norm(v_i); 
+        t2 = v_prev/norm(v_prev);
+        n1 = [t1(2), -t1(1)]; 
+        e1 = n1/norm(n1); n2 = [t2(2), -t2(1)]; e2 = n2/norm(n2);
+        F_water(i,:) = P_water(i)*sqrt(3)/2*(l_a(prev_idx)^2*e2 + l_a(i)^2*e1);
+        v_prev = v_b(prev_idx,:); v_i = v_b(i,:);
+        t1 = v_i/norm(v_i); t2 = v_prev/norm(v_prev);
+        n1 = [-t1(2), t1(1)]; e1 = n1/norm(n1); n2 = [-t2(2), t2(1)]; e2 = n2/norm(n2);
+        F_ecm(i,:) = P_ecm(i)*sqrt(3)/2*(l_b(prev_idx)^2*e2 + l_b(i)^2*e1);
+    end
+
+    % --- 7.6 Area Constraint Force ---
+    F_area_a = zeros(n, 2); F_area_b = zeros(n, 2);
+    for i = 1:n
+        next_idx = mod(i, n) + 1;
+        P1=r_a(i,:); P2=r_b(i,:); P3=r_b(next_idx,:); P4=r_a(next_idx,:);
+        A_curr = quad_area(P1, P2, P3, P4); dA = A_curr - A0;
+        dA_dP1 = -0.5*[-(P2(2)-P4(2)), P2(1)-P4(1)]; dA_dP2 = -0.5*[-(P3(2)-P1(2)), P3(1)-P1(1)];
+        dA_dP3 = -0.5*[-(P4(2)-P2(2)), P4(1)-P2(1)]; dA_dP4 = -0.5*[-(P1(2)-P3(2)), P1(1)-P3(1)];
+        F_area_a(i,:) = F_area_a(i,:) - K_area*dA*dA_dP1; F_area_b(i,:) = F_area_b(i,:) - K_area*dA*dA_dP2;
+        F_area_b(next_idx,:) = F_area_b(next_idx,:) - K_area*dA*dA_dP3; F_area_a(next_idx,:) = F_area_a(next_idx,:) - K_area*dA*dA_dP4;
+    end
+
+    % --- 7.7 Gaussian Curvature Constraint Force ---
+    F_gauss_a = zeros(n,2); F_gauss_b = zeros(n,2);
+    for i=1:n
+        next_idx = mod(i, n) + 1; prev_idx = mod(i-2, n) + 1;
+        F_gauss_a(i,:) = -(A_param*2*(-e_a(i,:))/(-l_b(i)*l_a(i)^2) + A_param*(-e_side(i,:))/(-l_side(i)^2*l_side(next_idx)) + A_param*2*(e_a(prev_idx,:))/(-l_b(prev_idx)*l_a(prev_idx)^2) + A_param*(-e_side(i,:))/(-l_side(i)^2*l_side(prev_idx)));
+        F_gauss_b(i,:) = -(A_param*2*(-e_b(i,:))/(-l_a(i)*l_b(i)^2) + A_param*(e_side(i,:))/(-l_side(i)^2*l_side(next_idx)) + A_param*2*(e_b(prev_idx,:))/(-l_a(prev_idx)*l_b(prev_idx)^2) + A_param*(e_side(i,:))/(-l_side(i)^2*l_side(prev_idx)));
+    end
+
+    % --- 7.8 Total Force and Dynamics ---
+    vel_a = zeros(n,2); vel_b = zeros(n,2);
+    for i=1:n
+        F_tot_a = F_area_a(i,:) + F_surface_a(i,:) - grad_side_a(i,:) + F_water(i,:) + F_bend_a(i,:) + F_gauss_a(i,:);
+        F_tot_b = F_area_b(i,:) + F_surface_b(i,:) - grad_side_b(i,:) + F_ecm(i,:) + F_bend_b(i,:) + F_gauss_b(i,:);
+        vel_a(i,:) = F_tot_a / mu; vel_b(i,:) = F_tot_b / mu;
+    end
+
+    % --- 7.9 Update Positions ---
+    for i=1:n
+        r_a(i,:) = r_a(i,:) + vel_a(i,:) * dt;
+        r_b(i,:) = r_b(i,:) + vel_b(i,:) * dt;
+    end
+
+    % --- 7.10 Save Key States ---
+    if next_save_idx <= length(save_steps)
+        if (save_steps(next_save_idx) > 0 && step == save_steps(next_save_idx)) || (save_steps(next_save_idx) == -1 && step == num_steps)
+            save_idx = save_idx + 1;
+            saved_states.r_a{save_idx} = r_a; saved_states.r_b{save_idx} = r_b;
+            next_save_idx = next_save_idx + 1;
+        end
+    end
+
+    % --- 7.11 Convergence Check ---
+    max_vel_a = max(sqrt(sum(vel_a.^2, 2))); max_vel_b = max(sqrt(sum(vel_b.^2, 2)));
+    vel_tol = 3e-10;
+    if (max_vel_a < vel_tol) && (max_vel_b < vel_tol)
+        if next_save_idx <= length(save_steps) && save_steps(next_save_idx) == -1
+            save_idx = save_idx + 1;
+            saved_states.r_a{save_idx} = r_a; saved_states.r_b{save_idx} = r_b;
+            next_save_idx = next_save_idx + 1;
+        end
+        fprintf('=== Simulation Converged ===\n');
+        break;
+    end
+end
+
+%% ========== 8. Construct Virtual State ==========
+final_idx = save_idx; 
+save_idx = save_idx + 1;
+saved_states.r_a{save_idx} = r_a_init;
+saved_states.r_b{save_idx} = saved_states.r_b{final_idx};
+
+%% ========== 9. Calculate Energy for All States ==========
+dE_a_all = zeros(save_idx, n); dE_b_all = zeros(save_idx, n); dE_vol_all = zeros(save_idx, n);
+E_total_all = zeros(1, save_idx);
+
+for idx = 1:save_idx
+    r_a_curr = saved_states.r_a{idx}; r_b_curr = saved_states.r_b{idx};
+    gamma_a_use = (idx == 1) * ones(n, 1) * gamma_a_base + (idx > 1) * gamma_a_local;
+    gamma_b_use = (idx == 1) * ones(n, 1) * gamma_b_base + (idx > 1) * gamma_b_local;
+
+    E_tot_curr = 0;
+    for i = 1:n
+        next_idx = mod(i, n) + 1;
+        l_a_curr = norm(r_a_curr(next_idx,:) - r_a_curr(i,:)); l_b_curr = norm(r_b_curr(next_idx,:) - r_b_curr(i,:));
+        l_side_curr = norm(r_b_curr(i,:) - r_a_curr(i,:)); l_side_next = norm(r_b_curr(next_idx,:) - r_a_curr(next_idx,:));
+        l_a_ref = norm(r_a_init(next_idx,:) - r_a_init(i,:)); l_b_ref = norm(r_b_init(next_idx,:) - r_b_init(i,:));
+
+        E_a_curr = 0.5 * sqrt(3) * gamma_a_use(i) * l_a_curr^2; E_a_ref = 0.5 * sqrt(3) * gamma_a_base * l_a_ref^2;
+        dE_a_all(idx, i) = E_a_curr - E_a_ref;
+        E_b_curr = 0.5 * sqrt(3) * gamma_b_use(i) * l_b_curr^2; E_b_ref = 0.5 * sqrt(3) * gamma_b_base * l_b_ref^2;
+        dE_b_all(idx, i) = E_b_curr - E_b_ref;
+
+        P1=r_a_curr(i,:); P2=r_b_curr(i,:); P3=r_b_curr(next_idx,:); P4=r_a_curr(next_idx,:);
+        A_curr = quad_area(P1, P2, P3, P4); E_area = 0.5 * K_area * (A_curr - A0)^2;
+        E_gauss = 0;
+        if (l_a_curr*l_b_curr) > 1e-24 && (l_side_curr*l_side_next) > 1e-24
+            E_gauss = (2 * A_param) / (l_a_curr * l_b_curr) + A_param / (l_side_curr * l_side_next);
+        end
+        E_vol_curr = E_area + E_gauss; dE_vol_all(idx, i) = E_vol_curr - E_ref_vol(i);
+        E_tot_curr = E_tot_curr + E_a_curr + E_b_curr + E_vol_curr;
+    end
+    E_total_all(idx) = E_tot_curr;
+end
+
+max_dE_a = max(abs(dE_a_all(:))); if max_dE_a < 1e-20, max_dE_a = 1; end
+max_dE_b = max(abs(dE_b_all(:))); if max_dE_b < 1e-20, max_dE_b = 1; end
+max_dE_vol = max(abs(dE_vol_all(:))); if max_dE_vol < 1e-20, max_dE_vol = 1; end
+
+%% ========== 10. Plot Energy Landscape Schematic ==========
+fprintf('=== Plotting Energy Landscape Schematic ===\n');
+fig = figure('Position', [100, 50, 1800, 1000], 'Color', 'w', 'Name', 'Energy Landscape Schematic');
+
+x_real = [1, 2, 3, 4, 5]; 
+idx_real = [1, 2, 3, 4, 5]; 
+E_real = E_total_all(idx_real);
+
+x_virt = 3;
+idx_virt = 6;
+E_virt = E_total_all(idx_virt);
+
+E_real_min = min(E_real);
+E_real_max = max(E_real);
+if E_real_max == E_real_min
+    E_real_max = E_real_min + 1e-20;
+end
+norm_y_real = @(y_val) 0.05 + (y_val - E_real_min) / (E_real_max - E_real_min) * 0.45;
+y_virt_pos = 0.65; 
+
+ax_pos = [0.10, 0.10, 0.82, 0.78]; 
+x_data_min = 0.5; x_data_max = 5.5;
+norm_x = @(x_val) ax_pos(1) + (x_val - x_data_min) / (x_data_max - x_data_min) * ax_pos(3);
+
+ax_main = axes('Position', ax_pos, 'Color', 'w', 'Box', 'on', 'LineWidth', 2);
+hold(ax_main, 'on'); 
+
+x_smooth = linspace(1, 5, 500);
+y_real_plot = norm_y_real(E_real);
+y_smooth_real = pchip(x_real, y_real_plot, x_smooth);
+plot(ax_main, x_smooth, y_smooth_real, 'k-', 'LineWidth', 2.5);
+
+set(ax_main, 'XTick', []); 
+set(ax_main, 'YTick', []); 
+xlabel(ax_main, 'Morphogenesis Stages', 'FontSize', 28, 'FontWeight', 'bold');
+xlim(ax_main, [x_data_min, x_data_max]);
+ylim(ax_main, [0.02, 0.85]);
+
+text(ax_main, x_data_min - 0.35, 0.82, 'E', 'FontSize', 28, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+
+highlight_threshold = 5e-3;
+small_w = 0.25;  
+small_h = 0.25;  
+
+plot_points_x = [x_real, x_virt];
+plot_points_idx = [idx_real, idx_virt];
+is_virtual = [false, false, false, false, false, true];
+labels = {'0', '1', '20', '50', 'Final'};
+
+y_plot_all = zeros(1, 6);
+y_plot_all(1:5) = y_real_plot;
+y_plot_all(6) = y_virt_pos;
+
+for k = 1:6
+    idx = plot_points_idx(k);
+    x_pos = plot_points_x(k);
+    cy = y_plot_all(k);
+    is_virt = is_virtual(k);
+    
+    r_a_curr = saved_states.r_a{idx}; r_b_curr = saved_states.r_b{idx};
+    cx = norm_x(x_pos);
+    
+    platform_half_len = 0.08; 
+    plot(ax_main, [x_pos - platform_half_len, x_pos + platform_half_len], [cy, cy], 'k-', 'LineWidth', 2);
+    
+    if is_virt
+        plot(ax_main, x_pos, cy, 'ro', 'MarkerSize', 4, 'MarkerFaceColor', 'w', 'LineWidth', 2);
+        text(ax_main, x_pos + 0.25, cy + 0.02, 'Virtual', 'FontSize', 16, 'FontWeight', 'bold', 'Color', 'r');
+    else
+        plot(ax_main, x_pos, cy, 'ko', 'MarkerSize', 4, 'MarkerFaceColor', 'k');
+    end
+    
+    pos_x_norm = cx - small_w/2;
+    pos_y_norm = cy + 0.02; 
+    
+    ax_small = axes('Position', [pos_x_norm, pos_y_norm, small_w, small_h], 'Color', 'w');
+    hold(ax_small, 'on'); axis(ax_small, 'equal'); axis(ax_small, 'off');
+    
+    for i = 1:n
+        next_idx = mod(i, n) + 1;
+        P1 = r_a_curr(i, :); P2 = r_b_curr(i, :); P3 = r_b_curr(next_idx, :); P4 = r_a_curr(next_idx, :);
+        dE_v = dE_vol_all(idx, i) / max_dE_vol; dE_v = max(-1, min(1, dE_v));
+        fill(ax_small, [P1(1), P2(1), P3(1), P4(1)], [P1(2), P2(2), P3(2), P4(2)], jet_color(dE_v), 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+    end
+    for i = 1:n
+        plot(ax_small, [r_a_curr(i,1), r_b_curr(i,1)], [r_a_curr(i,2), r_b_curr(i,2)], '-', 'Color', [0.6 0.6 0.6], 'LineWidth', 0.8);
+    end
+    for i = 1:n
+        next_idx = mod(i, n) + 1; P1 = r_a_curr(i, :); P2 = r_a_curr(next_idx, :);
+        dE_norm = dE_a_all(idx, i) / max_dE_a; dE_norm = max(-1, min(1, dE_norm));
+        plot(ax_small, [P1(1), P2(1)], [P1(2), P2(2)], '-', 'Color', jet_color(dE_norm), 'LineWidth', 2.5);
+    end
+    for i = 1:n
+        next_idx = mod(i, n) + 1; P1 = r_b_curr(i, :); P2 = r_b_curr(next_idx, :);
+        dE_norm = dE_b_all(idx, i) / max_dE_b; dE_norm = max(-1, min(1, dE_norm));
+        plot(ax_small, [P1(1), P2(1)], [P1(2), P2(2)], '-', 'Color', jet_color(dE_norm), 'LineWidth', 2.5);
+    end
+    if idx > 1
+        for i = 1:n
+            if gamma_b_local(i) > highlight_threshold
+                next_idx = mod(i, n) + 1;
+                P1 = r_a_curr(i, :); P2 = r_b_curr(i, :); P3 = r_b_curr(next_idx, :); P4 = r_a_curr(next_idx, :);
+                center = (P1 + P2 + P3 + P4) / 4;
+                plot(ax_small, center(1), center(2), 'r.', 'MarkerSize', 10, 'LineWidth', 1.5);
+            end
+        end
+    end
+    xlim(ax_small, [-1.5e-4, 1.5e-4]); ylim(ax_small, [-1.5e-4, 1.5e-4]);
+end
+
+sgtitle('Energy Landscape Schematic of Organoid Morphogenesis', 'FontSize', 31, 'FontWeight', 'bold');
+saveas(fig, 'energy_landscape_schematic_final_v7.png');
+fprintf('Energy landscape schematic saved.\n');
+
+
+%% ========== 11. Plot Individual Local Views: Segments 10-18 (Each State Output Separately) ==========
+fprintf('=== Plotting Individual Local Views (Segments 10-18) ===\n');
+
+seg_start = 10;
+seg_end   = 18;
+
+% State labels and corresponding file names
+local_labels = {'State 0 (Init)', 'State 1 (Step 1)', 'State 20 (Step 20)', ...
+                'State 50 (Step 50)', 'State Final'};
+file_names = {'local_view_state_0_init', 'local_view_state_1_step1', ...
+              'local_view_state_20_step20', 'local_view_state_50_step50', ...
+              'local_view_state_final'};
+
+for k = 1:5          % Only non-virtual states (idx = 1~5)
+    idx      = plot_points_idx(k);
+    r_a_curr = saved_states.r_a{idx};
+    r_b_curr = saved_states.r_b{idx};
+
+    % --- Create a separate Figure for each state ---
+    fig_local = figure('Position', [100, 100, 800, 800], 'Color', 'w', ...
+                       'Name', sprintf('Local View: %s', local_labels{k}));
+    
+    % Centered axes occupying most of the space
+    ax_loc = axes('Position', [0.05, 0.10, 0.90, 0.85], 'Color', 'w');
+    hold(ax_loc, 'on'); axis(ax_loc, 'equal'); axis(ax_loc, 'off');
+
+    % --- Quadrilateral Fill (vol energy) ---
+    for i = seg_start:seg_end
+        ni = mod(i,n)+1;
+        P1=r_a_curr(i,:); P2=r_b_curr(i,:); P3=r_b_curr(ni,:); P4=r_a_curr(ni,:);
+        dE_v = dE_vol_all(idx,i)/max_dE_vol; dE_v = max(-1,min(1,dE_v));
+        fill(ax_loc,[P1(1) P2(1) P3(1) P4(1)], ...
+                   [P1(2) P2(2) P3(2) P4(2)], ...
+                   jet_color(dE_v), 'FaceAlpha',0.1, 'EdgeColor','none');
+    end
+
+    % --- Side Connections (radial) ---
+    for i = seg_start:seg_end
+        plot(ax_loc,[r_a_curr(i,1) r_b_curr(i,1)], ...
+                   [r_a_curr(i,2) r_b_curr(i,2)], ...
+                   '-','Color',[0.55 0.55 0.55],'LineWidth',1);
+    end
+
+    % --- Inner Ring Edges (a-ring) ---
+    for i = seg_start:seg_end
+        ni = mod(i,n)+1;
+        P1=r_a_curr(i,:); P2=r_a_curr(ni,:);
+        dE_n = dE_a_all(idx,i)/max_dE_a; dE_n = max(-1,min(1,dE_n));
+        plot(ax_loc,[P1(1) P2(1)],[P1(2) P2(2)], ...
+             '-','Color',jet_color(dE_n),'LineWidth',10);
+    end
+
+    % --- Outer Ring Edges (b-ring) ---
+    for i = seg_start:seg_end
+        ni = mod(i,n)+1;
+        P1=r_b_curr(i,:); P2=r_b_curr(ni,:);
+        dE_n = dE_b_all(idx,i)/max_dE_b; dE_n = max(-1,min(1,dE_n));
+        plot(ax_loc,[P1(1) P2(1)],[P1(2) P2(2)], ...
+             '-','Color',jet_color(dE_n),'LineWidth',10);
+    end
+
+    % --- High Tension Red Dot Markers ---
+    if idx > 1
+        for i = seg_start:seg_end
+            if gamma_b_local(i) > highlight_threshold
+                ni = mod(i,n)+1;
+                P1=r_a_curr(i,:); P2=r_b_curr(i,:);
+                P3=r_b_curr(ni,:); P4=r_a_curr(ni,:);
+                ctr = (P1+P2+P3+P4)/4;
+                plot(ax_loc, ctr(1), ctr(2), 'r.','MarkerSize',12);
+            end
+        end
+    end
+
+    % --- Auto-fit Display Range (Add 20% Margin) ---
+    ax_pts = [r_a_curr(seg_start:seg_end,:); r_b_curr(seg_start:seg_end,:)];
+    xr = max(ax_pts(:,1))-min(ax_pts(:,1));
+    yr = max(ax_pts(:,2))-min(ax_pts(:,2));
+    xm = max(xr*0.20, 1e-5);
+    ym = max(yr*0.20, 1e-5);
+    xlim(ax_loc,[min(ax_pts(:,1))-xm, max(ax_pts(:,1))+xm]);
+    ylim(ax_loc,[min(ax_pts(:,2))-ym, max(ax_pts(:,2))+ym]);
+
+    % --- Add Title and Labels ---
+    % title(ax_loc, sprintf('Local View: Segments %d–%d | %s', seg_start, seg_end, local_labels{k}), ...
+    %       'FontSize', 18, 'FontWeight', 'bold');
+    % 
+    % Save individual image
+    saveas(fig_local, [file_names{k}, '.png']);
+    fprintf('Saved: %s.png\n', file_names{k});
+    
+    % Close current Figure to save memory (Optional, comment out this line if you want to keep it on screen)
+    % close(fig_local); 
+end
+
+fprintf('All local views saved individually.\n');
+
+
+
+
+
+
+%% ========== Helper Functions ==========
+function color = jet_color(t)
+    t = max(-1, min(1, t)); t_norm = (t + 1) / 2;
+    if t_norm < 0.25, color = [0, 4*t_norm, 1];
+    elseif t_norm < 0.5, color = [0, 1, 1 - 4*(t_norm - 0.25)];
+    elseif t_norm < 0.75, color = [4*(t_norm - 0.5), 1, 0];
+    else, color = [1, 1 - 4*(t_norm - 0.75), 0];
+    end
+    color = max(0, min(1, color));
+end
+
+function A = quad_area(P1, P2, P3, P4)
+    A = 0.5 * abs((P1(1)*P2(2) - P2(1)*P1(2)) + (P2(1)*P3(2) - P3(1)*P2(2)) + (P3(1)*P4(2) - P4(1)*P3(2)) + (P4(1)*P1(2) - P1(1)*P4(2)));
+end
