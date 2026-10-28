@@ -15,21 +15,6 @@ The models investigate how cell-surface tension, internal pressure, viscous dyna
 
 The repository provides MATLAB source code rather than a compiled standalone executable. No external dataset is required for the supplied demonstration: the examples generate simulated states from the initial conditions and parameters included in the code. Users who want to model experimental samples can replace those initial conditions and parameters as described in [Using the software with your own data](#using-the-software-with-your-own-data).
 
-## Repository structure
-
-```text
-vertex-model/
-├── 2D vertex model/
-│   ├── Morphological Evolution of Organoids/
-│   ├── ablation_healing/
-│   ├── osm_change/
-│   └── README.md
-├── brief energy model/
-│   ├── change_alpha.m
-│   └── README.md
-└── LICENSE
-```
-
 ### `2D vertex model`
 
 The two-dimensional model represents a cross-section of an organoid using vertex/trapezoidal approximations and viscous dynamics. It contains three groups of simulations:
@@ -369,23 +354,6 @@ To reproduce a quantitative result or manuscript figure:
 6. Save the MATLAB Command Window output, generated figures/data, and the parameter file together.
 7. Compare both the qualitative morphology and the reported numerical quantities; do not rely only on the appearance of a plot.
 
-## Software-submission checklist coverage
-
-This README provides the items normally requested for a software/code submission:
-
-| Required item | Location in this README |
-| --- | --- |
-| Source code availability | Repository structure and installation sections |
-| Software and operating-system requirements | Requirements and tested versions |
-| Versions tested | Requirements and tested versions |
-| Non-standard hardware requirements | Requirements and tested versions |
-| Installation instructions | Installation |
-| Typical installation time | Installation |
-| Demo instructions | Demo |
-| Expected demo output | Demo |
-| Expected demo runtime | Demo |
-| Instructions for use with custom data | Using the software with your own data |
-| Reproduction guidance | Reproducibility |
 
 ## Scope and limitations
 
